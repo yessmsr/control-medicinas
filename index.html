@@ -23,12 +23,9 @@
     .info{flex:1}
     .title{font-weight:bold;font-size:17px}
     .small{color:#666;font-size:14px;margin-top:4px}
-    input,select{width:100%;padding:11px;border:1px solid #ddd;border-radius:12px;margin-top:6px;box-sizing:border-box}
-    label{font-weight:bold;margin-top:10px;display:block}
     button{border:0;border-radius:12px;padding:11px;font-weight:bold;cursor:pointer;background:#c04f86;color:white}
     button.done{background:#3ca65c}
     button.gray{background:#777;width:100%;margin-top:10px}
-    button.danger{background:#d9534f}
     .progress{background:#f3e1eb;border-radius:999px;height:18px;overflow:hidden;margin-top:10px}
     .progress-bar{height:100%;background:#c04f86;width:0%}
     .next-box{background:#fff3cd;border-left:6px solid #f0ad4e;border-radius:14px;padding:14px;margin-bottom:12px}
@@ -49,7 +46,7 @@
 
   <div class="tabs">
     <button onclick="showTab('treatment')">Tratamiento</button>
-    <button onclick="showTab('manual')">Manual</button>
+    <button onclick="showTab('medicines')">Medicamentos</button>
     <button onclick="showTab('legend')">Simbología</button>
   </div>
 
@@ -61,25 +58,13 @@
     <button class="gray" onclick="resetTreatment()">Reiniciar checks del tratamiento</button>
   </section>
 
-  <section id="manual" class="card hidden">
-    <h2>Medicinas adicionales</h2>
-
-    <label>Nombre de la medicina</label>
-    <input id="manualName" placeholder="Ej: Acetaminofén">
-
-    <label>Dosis</label>
-    <input id="manualDose" placeholder="Ej: 5 ml">
-
-    <label>Hora</label>
-    <input id="manualTime" type="time">
-
-    <label>Nota opcional</label>
-    <input id="manualNote" placeholder="Ej: después de comer">
-
-    <button onclick="addManualMedicine()">Agregar medicina</button>
-
-    <h3>Lista manual</h3>
-    <div id="manualList"></div>
+  <section id="medicines" class="card hidden">
+    <h2>Medicamentos programados</h2>
+    <p class="small">Inicio: hoy a las 8:00 PM. Cada check guarda la hora real en que se dio.</p>
+    <div id="medicineNext"></div>
+    <div id="medicineSummary"></div>
+    <div id="medicineList"></div>
+    <button class="gray" onclick="resetMedicineChecks()">Reiniciar checks de medicamentos</button>
   </section>
 
   <section id="legend" class="card hidden">
@@ -111,21 +96,15 @@
 
 <script>
   const TREATMENT_KEY = "tratamiento_checks_630pm";
-  const MANUAL_KEY = "medicinas_manuales";
+  const MEDICINE_KEY = "medicamentos_checks_8pm";
   const START_KEY = "tratamiento_inicio_630pm";
+  const MEDICINE_START_KEY = "medicamentos_inicio_8pm";
 
   const medicineInfo = {
     "⬜": { name: "Combivent", dose: "8 gotas + 1.5 ml suero fisiológico" },
     "🔺": { name: "Salbutamol", dose: "3 gotas + 1.5 ml suero fisiológico" },
     "⭕": { name: "Pulmicort", dose: "1/2 ampolla + 1.5 ml suero fisiológico" }
   };
-
-  /*
-    Como la primera de 6:00 PM ya fue, este plan arranca desde 6:30 PM.
-    Patrón desde 6:30:
-    triángulo, triángulo, triángulo, cuadro, círculo,
-    luego cada 2 horas: triángulo, cuadro, triángulo, cuadro, triángulo, cuadro, círculo
-  */
 
   const firstBlock = [
     { symbol: "🔺", minutesAfterStart: 0 },
@@ -137,8 +116,43 @@
 
   const repeatingPattern = ["🔺", "⬜", "🔺", "⬜", "🔺", "⬜", "⭕"];
 
+  const fixedMedicines = [
+    {
+      name: "Nistat",
+      dose: "Cada 6 horas",
+      detail: "Por 7 días",
+      startTime: "20:00",
+      intervalHours: 6,
+      days: 7
+    },
+    {
+      name: "Isoprino",
+      dose: "12 gotas cada 8 horas",
+      detail: "Duración no indicada, se programa por 7 días",
+      startTime: "20:00",
+      intervalHours: 8,
+      days: 7
+    },
+    {
+      name: "Virazole",
+      dose: "3 ml cada 8 horas",
+      detail: "Por 5 días",
+      startTime: "20:00",
+      intervalHours: 8,
+      days: 5
+    },
+    {
+      name: "Flamydol",
+      dose: "1 cucharada cada 8 horas",
+      detail: "Duración no indicada, se programa por 5 días",
+      startTime: "20:00",
+      intervalHours: 8,
+      days: 5
+    }
+  ];
+
   let checks = JSON.parse(localStorage.getItem(TREATMENT_KEY)) || {};
-  let manualMedicines = JSON.parse(localStorage.getItem(MANUAL_KEY)) || [];
+  let medicineChecks = JSON.parse(localStorage.getItem(MEDICINE_KEY)) || {};
 
   function getStartDate() {
     let saved = localStorage.getItem(START_KEY);
@@ -149,6 +163,18 @@
     start.setHours(18, 30, 0, 0);
 
     localStorage.setItem(START_KEY, start.toISOString());
+    return start;
+  }
+
+  function getMedicineStartDate() {
+    let saved = localStorage.getItem(MEDICINE_START_KEY);
+    if (saved) return new Date(saved);
+
+    const now = new Date();
+    const start = new Date(now);
+    start.setHours(20, 0, 0, 0);
+
+    localStorage.setItem(MEDICINE_START_KEY, start.toISOString());
     return start;
   }
 
@@ -164,13 +190,6 @@
       weekday: "short",
       day: "2-digit",
       month: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-  }
-
-  function formatTime(date) {
-    return date.toLocaleTimeString("es-CR", {
       hour: "2-digit",
       minute: "2-digit"
     });
@@ -200,7 +219,7 @@
       }
     });
 
-    let nextDate = new Date(start.getTime() + 330 * 60000); 
+    let nextDate = new Date(start.getTime() + 330 * 60000);
     let index = 0;
 
     while (nextDate <= end) {
@@ -220,9 +239,32 @@
     return plan;
   }
 
+  function buildFixedMedicinePlan() {
+    const startBase = getMedicineStartDate();
+    const all = [];
+
+    fixedMedicines.forEach((med) => {
+      const totalDoses = Math.floor((med.days * 24) / med.intervalHours);
+
+      for (let i = 0; i < totalDoses; i++) {
+        const date = new Date(startBase.getTime() + i * med.intervalHours * 60 * 60 * 1000);
+
+        all.push({
+          id: `${med.name}-${i}`,
+          name: med.name,
+          dose: med.dose,
+          detail: med.detail,
+          date
+        });
+      }
+    });
+
+    return all.sort((a, b) => a.date - b.date);
+  }
+
   function showTab(tabId) {
     document.getElementById("treatment").classList.add("hidden");
-    document.getElementById("manual").classList.add("hidden");
+    document.getElementById("medicines").classList.add("hidden");
     document.getElementById("legend").classList.add("hidden");
 
     document.getElementById(tabId).classList.remove("hidden");
@@ -240,6 +282,17 @@
     render();
   }
 
+  function toggleMedicine(id) {
+    if (medicineChecks[id]) {
+      delete medicineChecks[id];
+    } else {
+      medicineChecks[id] = { givenAt: nowText() };
+    }
+
+    localStorage.setItem(MEDICINE_KEY, JSON.stringify(medicineChecks));
+    render();
+  }
+
   function resetTreatment() {
     if (!confirm("¿Seguro que quieres limpiar los checks del tratamiento?")) return;
     checks = {};
@@ -247,12 +300,19 @@
     render();
   }
 
-  function getNextPending(plan) {
-    return plan.find(item => !checks[item.id]) || null;
+  function resetMedicineChecks() {
+    if (!confirm("¿Seguro que quieres limpiar los checks de medicamentos?")) return;
+    medicineChecks = {};
+    localStorage.setItem(MEDICINE_KEY, JSON.stringify(medicineChecks));
+    render();
+  }
+
+  function getNextPending(plan, checkObject) {
+    return plan.find(item => !checkObject[item.id]) || null;
   }
 
   function renderNextDose(plan) {
-    const next = getNextPending(plan);
+    const next = getNextPending(plan, checks);
     const box = document.getElementById("nextDose");
 
     if (!next) {
@@ -264,7 +324,7 @@
 
     box.innerHTML = `
       <div class="next-box">
-        <div class="title">⏰ Próxima dosis</div>
+        <div class="title">⏰ Próxima dosis de nebulización</div>
         <div class="symbol">${next.symbol}</div>
         <strong>${formatDateTime(next.date)} - ${med.name}</strong>
         <div class="small">${med.dose}</div>
@@ -281,7 +341,7 @@
     const percent = total ? Math.round((done / total) * 100) : 0;
 
     document.getElementById("summary").innerHTML = `
-      <p><strong>Progreso:</strong> ${done}/${total} aplicadas</p>
+      <p><strong>Progreso nebulizaciones:</strong> ${done}/${total} aplicadas</p>
       <div class="progress">
         <div class="progress-bar" style="width:${percent}%"></div>
       </div>
@@ -291,7 +351,7 @@
   function renderSchedule() {
     const plan = buildTreatmentPlan();
     const container = document.getElementById("schedule");
-    const next = getNextPending(plan);
+    const next = getNextPending(plan, checks);
     const now = new Date();
 
     renderNextDose(plan);
@@ -324,88 +384,78 @@
     }).join("");
   }
 
-  function addManualMedicine() {
-    const name = document.getElementById("manualName").value.trim();
-    const dose = document.getElementById("manualDose").value.trim();
-    const time = document.getElementById("manualTime").value;
-    const note = document.getElementById("manualNote").value.trim();
+  function renderMedicineNext(plan) {
+    const next = getNextPending(plan, medicineChecks);
+    const box = document.getElementById("medicineNext");
 
-    if (!name || !dose || !time) {
-      alert("Completa nombre, dosis y hora.");
+    if (!next) {
+      box.innerHTML = `<div class="next-box"><strong>✅ Medicamentos programados completados.</strong></div>`;
       return;
     }
 
-    manualMedicines.push({
-      id: crypto.randomUUID(),
-      name,
-      dose,
-      time,
-      note,
-      done: false,
-      markedAt: null
-    });
-
-    localStorage.setItem(MANUAL_KEY, JSON.stringify(manualMedicines));
-
-    document.getElementById("manualName").value = "";
-    document.getElementById("manualDose").value = "";
-    document.getElementById("manualTime").value = "";
-    document.getElementById("manualNote").value = "";
-
-    render();
-  }
-
-  function toggleManual(id) {
-    manualMedicines = manualMedicines.map(item => {
-      if (item.id !== id) return item;
-
-      return {
-        ...item,
-        done: !item.done,
-        markedAt: !item.done ? nowText() : null
-      };
-    });
-
-    localStorage.setItem(MANUAL_KEY, JSON.stringify(manualMedicines));
-    render();
-  }
-
-  function deleteManual(id) {
-    if (!confirm("¿Eliminar esta medicina manual?")) return;
-    manualMedicines = manualMedicines.filter(item => item.id !== id);
-    localStorage.setItem(MANUAL_KEY, JSON.stringify(manualMedicines));
-    render();
-  }
-
-  function renderManual() {
-    const list = document.getElementById("manualList");
-
-    if (manualMedicines.length === 0) {
-      list.innerHTML = `<p class="small">No hay medicinas manuales agregadas.</p>`;
-      return;
-    }
-
-    const sorted = [...manualMedicines].sort((a, b) => a.time.localeCompare(b.time));
-
-    list.innerHTML = sorted.map(item => `
-      <div class="dose ${item.done ? "done" : ""}">
-        <div class="info">
-          <div class="title">${item.done ? "✅" : "💊"} ${item.time} - ${item.name}</div>
-          <div class="small">Dosis: ${item.dose}</div>
-          ${item.note ? `<div class="small">Nota: ${item.note}</div>` : ""}
-          ${item.markedAt ? `<div class="small">Marcada: ${item.markedAt}</div>` : ""}
-        </div>
-        <button class="${item.done ? "done" : ""}" onclick="toggleManual('${item.id}')">
-          ${item.done ? "Listo" : "Dar"}
+    box.innerHTML = `
+      <div class="next-box">
+        <div class="title">⏰ Próximo medicamento</div>
+        <strong>${formatDateTime(next.date)} - ${next.name}</strong>
+        <div class="small">${next.dose}</div>
+        <div class="small">${next.detail}</div>
+        <button style="margin-top:10px;width:100%;" onclick="toggleMedicine('${next.id}')">
+          Marcar dado
         </button>
-        <button class="danger" onclick="deleteManual('${item.id}')">X</button>
       </div>
-    `).join("");
+    `;
+  }
+
+  function renderMedicineSummary(plan) {
+    const done = Object.keys(medicineChecks).length;
+    const total = plan.length;
+    const percent = total ? Math.round((done / total) * 100) : 0;
+
+    document.getElementById("medicineSummary").innerHTML = `
+      <p><strong>Progreso medicamentos:</strong> ${done}/${total} dados</p>
+      <div class="progress">
+        <div class="progress-bar" style="width:${percent}%"></div>
+      </div>
+    `;
+  }
+
+  function renderMedicineList() {
+    const plan = buildFixedMedicinePlan();
+    const list = document.getElementById("medicineList");
+    const next = getNextPending(plan, medicineChecks);
+    const now = new Date();
+
+    renderMedicineNext(plan);
+    renderMedicineSummary(plan);
+
+    list.innerHTML = plan.map((item, index) => {
+      const done = !!medicineChecks[item.id];
+      const isNext = next && next.id === item.id;
+      const isLate = !done && item.date < now;
+
+      return `
+        <div class="dose ${done ? "done" : ""} ${isNext ? "next" : ""} ${isLate ? "late" : ""}">
+          <div class="info">
+            <div class="title">
+              ${done ? "✅" : "💊"} ${index + 1}. ${formatDateTime(item.date)} - ${item.name}
+            </div>
+            <div class="small">Dosis: ${item.dose}</div>
+            <div class="small">${item.detail}</div>
+            ${done ? `<div class="small">Dado realmente: ${medicineChecks[item.id].givenAt}</div>` : ""}
+            ${isNext ? `<div class="small"><strong>Próximo pendiente</strong></div>` : ""}
+            ${isLate ? `<div class="small"><strong>Atrasado</strong></div>` : ""}
+          </div>
+          <button class="${done ? "done" : ""}" onclick="toggleMedicine('${item.id}')">
+            ${done ? "Listo" : "Dar"}
+          </button>
+        </div>
+      `;
+    }).join("");
   }
 
   function render() {
     renderSchedule();
-    renderManual();
+    renderMedicineList();
   }
 
   render();
